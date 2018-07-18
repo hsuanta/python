@@ -4,6 +4,7 @@
 import sys
 import os
 import uuid
+import time
 import sysutils
 import output
 
@@ -15,8 +16,8 @@ pkgs = ['kubernetes-node-linux-arm.tar.gz',
 			'kubernetes-node-linux-amd64.tar.gz']
 pauses = ['pause-arm.tar', 'pause-arm64.tar', 'pause-amd64.tar']
 
-k8s_url = 'https://dl.k8s.io/v1.10.5/'
-pause_url = None
+# k8s_url = 'https://dl.k8s.io/v1.10.5/'
+# pause_url = None
 save_dir = '/tmp'
 repository = 'k8s.gcr.io'
 log_path = '/tmp/k8s_install.log'
@@ -28,10 +29,12 @@ kubeproxy_path = '/usr/bin/kubeproxy'
 kubelet_config = '/etc/kubernetes/kubelet.conf'
 kubeproxy_config = '/etc/kubernetes/kube-proxy.conf'
 
+polling_time = 10
 
 class core(object):
 	
 	def __init__(self, arch, ifname, server, data=None):
+	
 		self.arch = arch
 		if self.arch == 'armv7l':
 			self.pkg = pkgs[0]
@@ -60,7 +63,8 @@ class core(object):
 		
 	def downloadPKG(self):
 		
-		pkg_url = k8s_url + self.pkg
+		pkg_url = self.metadata[u'result'][u'clientsUrl']
+		pause_url = self.metadata[u'result'][u'containersUrl']
 		
 		self.pkg_path = os.path.join(save_dir, self.pkg)
 		self.pause_path = os.path.join(save_dir, self.pause)
@@ -125,7 +129,7 @@ class core(object):
 		list = sysutils.getJsonItem(daemon_json,  u'insecure-registries')
 		if list:
 			registry = list[0].split(':')[0]
-			if registry == self.metadata[u'result'][u'ip']
+			if registry == self.metadata[u'result'][u'ip']:
 				self.log.info("INFO: REGISTRY has been set.")
 				return True
 			daemon_conntent = '''
@@ -323,10 +327,10 @@ class core(object):
 		# dict type
 		self.metadata = sysutils.POST(url, data)
 		if not self.metadata:
-			self.log.error("ERROR: Failed to get membership from server: %s" % metadata)
+			self.log.error("ERROR: Failed to get membership from server: %s" % self.metadata[u'message'])
 			return False
 		if self.metadata[u'code'] != 200:
-			self.log.error("ERROR: Failed to get membership from server: %s" % metadata)
+			self.log.error("ERROR: Failed to get membership from server: %s" % self.metadata[u'message'])
 			return False
 		return True
 		
@@ -359,13 +363,20 @@ class core(object):
 					
 	def run(self):
 		
-		self.log = output.Logging('log_path')
+		self.log = output.Logging(log_path)
 		self.log.info('program is running now.')
 		
 		if sysutils.IsExecutable(kubelet_path) and sysutils.IsExecutable(kubeproxy_path):
 			self.k8s_installed = True
-			output.info('kubernetes node has been installed')
-			
+			self.log.info('kubernetes node has been installed')
 		
-# if __name__ == '__main__':
-	# main()
+		while True:
+			if self.requestToServer():
+				self.getClusterInfo()
+				self.checkClusterInfo()
+				if not self.match:
+					self.leaveCluster()
+					self.joinCluster()
+				else:
+					print("INFO: nothing to update.")
+			time.sleep(polling_time)

@@ -1,14 +1,14 @@
 #!/usr/bin/env python
 # coding:utf-8 
 
-import sys, os
+import sys, os, commands
 import platform, argparse
 from  helpformatter import SortingHelpFormatter
 
 __VERSION__ = '1.0.0'
 
 
-machies = ['armv7l', 'arm64', 'amd64']
+machines = ['armv7l', 'arm64', 'amd64']
 _num = None
 
 def InitArgs():
@@ -29,8 +29,8 @@ def CheckArgs(interface, server):
 	if not os.path.exists(interface_path):
 		sys.stderr.write('ERROR: INTERFACE \'%s\' does not exist.\n' % interface)
 		retVal = 1
-	cmd = 'ping -c1 %s &>/dev/null' % server
-	result = os.system(cmd)
+	cmd = 'ping -c1 %s' % server
+	result, output = commands.getstatusoutput(cmd)
 	if result != 0:
 		sys.stderr.write('ERROR: SERVER \'%s\' is unreachable.\n' % server)
 		retVal = 1
@@ -42,7 +42,7 @@ def CheckEnv():
 		sys.stderr.write('ERROR: Need to be root.\n')
 		sys.exit(1)
 
-	global arch_num
+	global _num
 	_machine = platform.machine()
 	if _machine == 'armv7l':
 		_num = 0
@@ -55,7 +55,7 @@ def CheckEnv():
 		sys.exit(1)
 
 	cmd = 'systemctl status docker &>/dev/null'
-	result = os.system(cmd)
+	result, output = commands.getstatusoutput(cmd)
 	if result != 0:
 		sys.stderr.write('ERROR: docker service is not running.\n')
 		sys.exit(1)
@@ -72,7 +72,7 @@ if __name__ == '__main__':
 	pre_code = CheckArgs(args.interface, args.server)
 	if pre_code != 0:
 		sys.exit(pre_code)
-	if not arch_num:
+	if not _num:
 		sys.exit(1)
 
 	import core

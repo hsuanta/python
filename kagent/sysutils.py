@@ -7,6 +7,8 @@ import commands
 import re
 import json
 
+reload(sys)
+sys.setdefaultencoding('utf8')
 
 def EnsureDirExists(dir):
 	if os.path.isdir(dir):
@@ -30,6 +32,10 @@ def RemoveDir(dir):
 	return True
 		
 def WriteToFile(file, content, mode='a'):
+	if type(content) != str:
+				reload(sys)
+				sys.setdefaultencoding( "utf-8" )
+                content = str(content)
 	try:
 		with open(file, mode) as f:
 			f.writelines(content+'\n')
@@ -238,5 +244,6 @@ def POST(url, data, headers=None):
 		sys.stderr.write(e.message + '\n')
 		return False
 	result = json.loads(response.text)
+	# result = json.dumps(response.text,encoding="UTF-8", ensure_ascii=False)
 	return result
 	
