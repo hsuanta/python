@@ -8,7 +8,7 @@ from  helpformatter import SortingHelpFormatter
 __VERSION__ = '1.0.0'
 
 
-machines = ['armv7l', 'arm64', 'amd64']
+machines = ['armv7l', 'arm64', 'x86_64']
 _num = None
 
 def InitArgs():

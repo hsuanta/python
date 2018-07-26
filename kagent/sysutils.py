@@ -35,7 +35,7 @@ def WriteToFile(file, content, mode='a'):
 	if type(content) != str:
 				reload(sys)
 				sys.setdefaultencoding( "utf-8" )
-                content = str(content)
+				content = str(content)
 	try:
 		with open(file, mode) as f:
 			f.writelines(content+'\n')
@@ -121,13 +121,14 @@ def Ungzip(gzfile, dir):
 	return True
 	
 def findfiles(path, pfile):
+	import fnmatch
 	try:
 		for root, dirs, files in os.walk(path):
 			for file in fnmatch.filter(files, pfile):
-				yield os.path.join(root, file)
+				return os.path.join(root, file)
 	except Exception, e:
 		sys.stderr.write(e.message + '\n')
-		return
+		return False
 		
 def get_newest_file(dir, fextension):
 	_dir = os.path.abspath(dir)

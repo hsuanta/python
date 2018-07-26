@@ -22,12 +22,13 @@ save_dir = '/tmp'
 repository = 'k8s.gcr.io'
 log_path = '/tmp/k8s_install.log'
 
-k8s_installed = False
+
 kubelet_path = '/usr/bin/kubelet'
-kubeproxy_path = '/usr/bin/kubeproxy'
+kube_proxy_path = '/usr/bin/kube-proxy'
+kubectl_path = '/usr/bin/kubectl'
 
 kubelet_config = '/etc/kubernetes/kubelet.conf'
-kubeproxy_config = '/etc/kubernetes/kube-proxy.conf'
+kube_proxy_config = '/etc/kubernetes/kube-proxy.conf'
 
 polling_time = 10
 
@@ -45,6 +46,7 @@ class core(object):
 		elif self.arch == 'x86_64': 
 			self.pkg = pkgs[2]
 			self.pause = pauses[2]
+		self.k8s_installed = False
 		self.ifname = ifname
 		self.server = server
 		self.server_port = 8050
@@ -53,7 +55,7 @@ class core(object):
 		mac = uuid.UUID(int = uuid.getnode()).hex[-12:]	
 		self.mac = ":".join([mac[e:e+2] for e in range(0,11,2)])
 	
-	def createDir():
+	def createDir(self):
 
 		sysutils.EnsureDirExists('/etc/docker')
 		sysutils.EnsureDirExists('/var/lib/kubelet')
@@ -81,26 +83,32 @@ class core(object):
 		
 	def decompressPKG(self):
 		
-		if self.pkg_path.os.path.exsits():
-			if not sysutils.Ungzip(self.pkg_path):
+		if os.path.exists(self.pkg_path):
+			if not sysutils.Ungzip(self.pkg_path, save_dir):
 				self.log.error("Failed to decompress %s package." %self.pkg)
 				sys.exit(1)
 		
 	def cleanPKG(self):
 	
-		if self.pkg_path.os.path.exsits():
+		if os.path.exists(self.pkg_path):
 			sysutils.RemoveFile(self.pkg_path)
 		extract_dir=os.path.join(save_dir,'kubernetes')
-		if extract_dir.os.path.exsits():
+		if os.path.exists(extract_dir):
 			sysutils.RemoveDir(extract_dir)
 			
 	def cpFile(self):
 	
 		kubelet = sysutils.findfiles(save_dir, 'kubelet')
 		kube_proxy = sysutils.findfiles(save_dir, 'kube-proxy')
+		kubectl = sysutils.findfiles(save_dir, 'kubectl')
 		
-		sysutils.runCMD('cp %s %s' % (kubelet, kubelet_path))
-		sysutils.runCMD('cp %s %s' % (kube-proxy, kubeproxy_path))
+		if kubelet and kube_proxy and kubectl:
+			sysutils.runCMD('cp %s %s' % (kubelet, kubelet_path))
+			sysutils.runCMD('cp %s %s' % (kube_proxy, kube_proxy_path))
+			sysutils.runCMD('cp %s %s' % (kubectl, kubectl_path))
+		else:
+			self.log.error("Failed to find file in cpFile().")
+			sys.exit(1)
 	
 	def uploadImage(self):
 		
@@ -108,13 +116,11 @@ class core(object):
 			sysutils.ServiceCtl('docker', 'enable')
 			sysutils.ServiceCtl('docker', 'restart')
 		op = sysutils.runCMD('docker images --format={{.Repository}}')
-		if not op:
-			self.log.error("Failed to check docker repository.")
-			sys.exit(1)
 		self.infra = os.path.join(repository, self.pause).replace(".tar", "")
 		if op.find(self.infra) != -1:
 			self.log.warnning("%s image has been exists in docker repository." % self.infra)
-			return
+			self.infra_version = sysutils.runCMD('docker images %s --format={{.Tag}}' % self.infra)
+			return 
 		self.log.info("Try to upload container image to docker repository.")
 		op = sysutils.runCMD('docker load -i %s' % self.pause_path)
 		if not op:
@@ -129,12 +135,10 @@ class core(object):
 		list = sysutils.getJsonItem(daemon_json,  u'insecure-registries')
 		if list:
 			registry = list[0].split(':')[0]
-			if registry == self.metadata[u'result'][u'ip']:
+			if registry == self.master_ip:
 				self.log.info("INFO: REGISTRY has been set.")
 				return True
-			daemon_conntent = '''
-			{ "insecure-registries":["%s:5000"] }
-			''' % self.metadata[u'result'][u'ip']
+			daemon_conntent = '''{ "insecure-registries":["%s:5000"] }''' % self.master_ip
 			sysutils.WriteToFile(daemon_json, daemon_conntent, mode='w')
 			
 			sysutils.runCMD('systemctl daemon-reload')
@@ -150,68 +154,68 @@ class core(object):
 
 		config_file = '/etc/kubernetes/config'
 		config_content = '''
-		KUBE_LOGTOSTDERR="--logtostderr=true"
-		KUBE_LOG_LEVEL="--v=0"
-		KUBE_ALLOW_PRIV="--allow-privileged=true"
-		'''
-		sysutils.WriteToFile(config_file, config_content, mode='w')
+KUBE_LOGTOSTDERR="--logtostderr=true"
+KUBE_LOG_LEVEL="--v=0"
+KUBE_ALLOW_PRIV="--allow-privileged=true"
+'''
+		sysutils.WriteToFile(config_file, config_content.strip(), mode='w')
 		
 		kubelet_file = '/etc/kubernetes/kubelet'
 		kubelet_content = '''
-		KUBELET_ADDRESS="--address=%s"
-		KUBELET_HOSTNAME="--hostname-override=%s"
-		KUBELET_POD_INFRA_CONTAINER="--pod-infra-container-image=%s:%s"
-		KUBELET_ARGS="--kubeconfig=%s"
-		''' % (self.local_ip, self.node, self.infra, self.infra_version, kubelet_config)
-		sysutils.WriteToFile(kubelet_file, kubelet_content, mode='w')
+KUBELET_ADDRESS="--address=%s"
+KUBELET_HOSTNAME="--hostname-override=%s"
+KUBELET_POD_INFRA_CONTAINER="--pod-infra-container-image=%s:%s"
+KUBELET_ARGS="--kubeconfig=%s"
+''' % (self.local_ip, self.node, self.infra, self.infra_version, kubelet_config)
+		sysutils.WriteToFile(kubelet_file, kubelet_content.strip(), mode='w')
 		
 		kubelet_config_content = '''
-		apiVersion: v1
-		clusters:
-		- cluster:
-			insecure-skip-tls-verify: true
-			server: http://%s:%s
-		  name: kubernetes
-		contexts:
-		- context:
-			cluster: kubernetes
-			user: ""
-		  name: system:node:%s
-		current-context: system:node:%s
-		kind: Config
-		preferences: {}
-		users: []
-		''' % (self.master_ip, self.master_port, self.node, self.node)
-		sysutils.WriteToFile(kubelet_config, kubelet_config_content, mode='w')
+apiVersion: v1
+clusters:
+- cluster:
+    insecure-skip-tls-verify: true
+    server: http://%s:%s
+  name: kubernetes
+contexts:
+- context:
+    cluster: kubernetes
+    user: ""
+  name: system:node:%s
+current-context: system:node:%s
+kind: Config
+preferences: {}
+users: []
+''' % (self.master_ip, self.master_port, self.node, self.node)
+		sysutils.WriteToFile(kubelet_config, kubelet_config_content.strip(), mode='w')
 		
 		service_file = '/etc/systemd/system/kubelet.service'
 		service_content = '''
-		[Unit]
-		Description=Kubernetes Kubelet Server
-		Documentation=https://github.com/GoogleCloudPlatform/kubernetes
-		After=docker.service
-		Requires=docker.service
+[Unit]
+Description=Kubernetes Kubelet Server
+Documentation=https://github.com/GoogleCloudPlatform/kubernetes
+After=docker.service
+Requires=docker.service
 
-		[Service]
-		WorkingDirectory=/var/lib/kubelet
-		EnvironmentFile=-/etc/kubernetes/config
-		EnvironmentFile=-/etc/kubernetes/kubelet
-		ExecStart=/usr/bin/kubelet \\
-					$KUBE_LOGTOSTDERR \\
-					$KUBE_LOG_LEVEL \\
-					$KUBELET_API_SERVER \\
-					$KUBELET_ADDRESS \\
-					$KUBELET_PORT \\
-					$KUBELET_HOSTNAME \\
-					$KUBE_ALLOW_PRIV \\
-					$KUBELET_POD_INFRA_CONTAINER \\
-					$KUBELET_ARGS
-		Restart=on-failure
+[Service]
+WorkingDirectory=/var/lib/kubelet
+EnvironmentFile=-/etc/kubernetes/config
+EnvironmentFile=-/etc/kubernetes/kubelet
+ExecStart=/usr/bin/kubelet \\
+            $KUBE_LOGTOSTDERR \\
+            $KUBE_LOG_LEVEL \\
+            $KUBELET_API_SERVER \\
+            $KUBELET_ADDRESS \\
+            $KUBELET_PORT \\
+            $KUBELET_HOSTNAME \\
+            $KUBE_ALLOW_PRIV \\
+            $KUBELET_POD_INFRA_CONTAINER \\
+            $KUBELET_ARGS
+Restart=on-failure
 
-		[Install]
-		WantedBy=multi-user.target
-		'''
-		sysutils.WriteToFile(service_file, service_content, mode='w')
+[Install]
+WantedBy=multi-user.target
+'''
+		sysutils.WriteToFile(service_file, service_content.strip(), mode='w')
 		
 		sysutils.runCMD('systemctl daemon-reload')
 		sysutils.ServiceCtl('kubelet', 'enable')
@@ -223,50 +227,51 @@ class core(object):
 			
 	def configKubeproxy(self):
 		
-		kubeproxy_file = '/etc/kubernetes/proxy'
-		kubeproxy_content = '''
-		KUBE_PROXY_ARGS="--hostname-override=%s --kubeconfig=%s"
-		''' % (self.node, kubeproxy_config)
-		sysutils.WriteToFile(proxy_file, proxy_content, mode='w')
+		proxy_file = '/etc/kubernetes/proxy'
+		proxy_content = '''
+KUBE_PROXY_ARGS="--hostname-override=%s --kubeconfig=%s"
+''' % (self.node, kube_proxy_config)
+		sysutils.WriteToFile(proxy_file, proxy_content.strip(), mode='w')
 		
-		kubeproxy_config_content = '''
-		apiVersion: v1
-		clusters:
-		- cluster:
-			server: http://%s:%s
-		  name: kubernetes
-		contexts:
-		- context:
-			cluster: kubernetes
-		  name: default
-		current-context: default
-		kind: Config
-		preferences: {}
-		users: []
-		''' % (self.master_ip, self.master_port)
+		kube_proxy_config_content = '''
+apiVersion: v1
+clusters:
+- cluster:
+    server: http://%s:%s
+  name: kubernetes
+contexts:
+- context:
+    cluster: kubernetes
+  name: default
+current-context: default
+kind: Config
+preferences: {}
+users: []
+''' % (self.master_ip, self.master_port)
+		sysutils.WriteToFile(kube_proxy_config, kube_proxy_config_content.strip(), mode='w')
 		
 		service_file = '/etc/systemd/system/kube-proxy.service'
 		service_content = '''
-		[Unit]
-		Description=Kubernetes Kube-Proxy Server
-		Documentation=https://github.com/GoogleCloudPlatform/kubernetes
-		After=network.target
+[Unit]
+Description=Kubernetes Kube-Proxy Server
+Documentation=https://github.com/GoogleCloudPlatform/kubernetes
+After=network.target
 
-		[Service]
-		EnvironmentFile=-/etc/kubernetes/config
-		EnvironmentFile=-/etc/kubernetes/proxy
-		ExecStart=/usr/bin/kube-proxy \\
-					$KUBE_LOGTOSTDERR \\
-					$KUBE_LOG_LEVEL \\
-					$KUBE_MASTER \\
-					$KUBE_PROXY_ARGS
-		Restart=on-failure
-		LimitNOFILE=65536
+[Service]
+EnvironmentFile=-/etc/kubernetes/config
+EnvironmentFile=-/etc/kubernetes/proxy
+ExecStart=/usr/bin/kube-proxy \\
+            $KUBE_LOGTOSTDERR \\
+            $KUBE_LOG_LEVEL \\
+            $KUBE_MASTER \\
+            $KUBE_PROXY_ARGS
+Restart=on-failure
+LimitNOFILE=65536
 
-		[Install]
-		WantedBy=multi-user.target
-		'''
-		sysutils.WriteToFile(service_file, service_content, mode='w')
+[Install]
+WantedBy=multi-user.target
+'''
+		sysutils.WriteToFile(service_file, service_content.strip(), mode='w')
 		
 		sysutils.runCMD('systemctl daemon-reload')
 		sysutils.ServiceCtl('kube-proxy', 'enable')
@@ -283,6 +288,7 @@ class core(object):
 			self.downloadPKG()
 			self.decompressPKG()
 			self.cpFile()
+			self.uploadImage()
 		self.configDocker()
 		self.configKubelet()
 		self.configKubeproxy()
@@ -290,14 +296,14 @@ class core(object):
 			
 	def leaveCluster(self):
 		
-		if sysutils.EnsureFileExists(self.kubelet_config):
+		if sysutils.EnsureFileExists(kubelet_config):
 			if self.k8s_conf_node != None:
 				sysutils.runCMD("kubectl delete node %s -s http://%s:%s" % (self.k8s_conf_node, self.k8s_conf_master, self.k8s_conf_port))
 			
 			sysutils.ServiceCtl('kubelet', 'stop')
 			sysutils.ServiceCtl('kube-proxy', 'stop')
 			sysutils.RemoveFile(kubelet_config)
-			sysutils.RemoveFile(kubeproxy_config)
+			sysutils.RemoveFile(kube_proxy_config)
 		
 	def requestToServer(self):
 		
@@ -327,10 +333,10 @@ class core(object):
 		# dict type
 		self.metadata = sysutils.POST(url, data)
 		if not self.metadata:
-			self.log.error("ERROR: Failed to get membership from server: %s" % self.metadata[u'message'])
+			self.log.error("Failed to get membership from server: %s" % self.metadata[u'message'])
 			return False
 		if self.metadata[u'code'] != 200:
-			self.log.error("ERROR: Failed to get membership from server: %s" % self.metadata[u'message'])
+			self.log.error("Failed to get membership from server: %s" % self.metadata[u'message'])
 			return False
 		return True
 		
@@ -351,22 +357,26 @@ class core(object):
 	def checkClusterInfo(self):
 		
 		self.match = True
-		if self.k8s_conf_master != str(self.metadata[u'result'][u'ip']):
+		self.master_ip = str(self.metadata[u'result'][u'ip'])
+		self.master_port = str(self.metadata[u'result'][u'port'])
+		self.node = str(self.metadata[u'result'][u'nodeName'])
+		
+		if self.k8s_conf_master != self.master_ip:
 			self.match = False
-			self.log.info("update found in KUBERNETES MASTER: oldVal [%s] newVal[%s]" % (self.k8s_conf_master, self.metadata[u'result'][u'ip']))
-		if self.k8s_conf_port != str(self.metadata[u'result'][u'port']):
+			self.log.info("update found in KUBERNETES MASTER: oldVal [%s] newVal[%s]" % (self.k8s_conf_master, self.master_ip))
+		if self.k8s_conf_port != self.master_port:
 			self.match = False
-			self.log.info("update found in KUBERNETES MASTER PORT: oldVal [%s] newVal[%s]" % (self.k8s_conf_port, self.metadata[u'result'][u'port']))
-		if self.k8s_conf_node != str(self.metadata[u'result'][u'nodeName']):
+			self.log.info("update found in KUBERNETES MASTER PORT: oldVal [%s] newVal[%s]" % (self.k8s_conf_port, self.master_port))
+		if self.k8s_conf_node != self.node:
 			self.match = False
-			self.log.info("update found in KUBERNETES nodeName: oldVal [%s] newVal[%s]" % (self.k8s_conf_node, self.metadata[u'result'][u'nodeName']))
+			self.log.info("update found in KUBERNETES nodeName: oldVal [%s] newVal[%s]" % (self.k8s_conf_node, self.node))
 					
 	def run(self):
 		
 		self.log = output.Logging(log_path)
 		self.log.info('program is running now.')
 		
-		if sysutils.IsExecutable(kubelet_path) and sysutils.IsExecutable(kubeproxy_path):
+		if sysutils.IsExecutable(kubelet_path) and sysutils.IsExecutable(kube_proxy_path) and sysutils.IsExecutable(kubectl_path):
 			self.k8s_installed = True
 			self.log.info('kubernetes node has been installed')
 		
